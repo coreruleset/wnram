@@ -8,40 +8,6 @@ import (
 	"unicode/utf8"
 )
 
-type tokenType uint8
-
-const (
-	tNone tokenType = iota
-	tEOL
-	tNumber
-	tPOS
-)
-
-func (t tokenType) GoString() string {
-	return t.String()
-}
-
-func (t tokenType) String() string {
-	switch t {
-	case tNone:
-		return "none"
-	case tEOL:
-		return "eol"
-	case tNumber:
-		return "number"
-	case tPOS:
-		return "pos"
-	}
-	return "unknown"
-}
-
-type token struct {
-	t tokenType
-	v string
-	n int64
-	p PartOfSpeech
-}
-
 type lexable string
 
 func (l *lexable) chomp() {
@@ -97,7 +63,7 @@ func (l *lexable) lexDecimalNumber() (int64, error) {
 func (l *lexable) lexWord() (string, error) {
 	l.chomp()
 	var word []byte
-	buf := make([]byte, 4, 4)
+	buf := make([]byte, 4)
 	for {
 		if r, ok := l.peek(); !ok || unicode.IsSpace(r) {
 			break
@@ -155,7 +121,7 @@ func (l *lexable) lexOffset() (string, error) {
 			return "", fmt.Errorf("invalid chars in offset: %s", string((*l)[0:8]))
 		}
 	}
-	cpy := make([]byte, 8, 8)
+	cpy := make([]byte, 8)
 	copy(cpy, (*l)[0:8])
 	*l = (*l)[8:]
 	return string(cpy), nil
@@ -267,7 +233,7 @@ type parsed struct {
 	rels       []parsedRel
 }
 
-func parseLine(data []byte, line, offset int64) (*parsed, error) {
+func parseLine(data []byte, line int64) (*parsed, error) {
 	l := lexable(data)
 
 	l.chomp()
@@ -303,12 +269,12 @@ func parseLine(data []byte, line, offset int64) (*parsed, error) {
 	for ; wordcount > 0; wordcount-- {
 		value, err := l.lexWord()
 		if err != nil {
-			return nil, fmt.Errorf("word expected: %s")
+			return nil, fmt.Errorf("word expected: %s", err)
 		}
 		// XXX: handle syntactic markers
 		sense, err := l.lexHexNumber()
 		if err != nil {
-			return nil, fmt.Errorf("sense id expected: %s")
+			return nil, fmt.Errorf("sense id expected: %s", err)
 		}
 		p.words = append(p.words, word{
 			word:  value,

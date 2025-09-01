@@ -2,6 +2,7 @@ package wnram
 
 import (
 	"bufio"
+	"fmt"
 	"io"
 	"os"
 )
@@ -27,7 +28,6 @@ func inPlaceReadLine(s io.Reader, cb func([]byte, int64, int64) error) error {
 	}
 	// If we reached end of file and the line contents are empty, don't return an additional line.
 	if err == io.EOF {
-		err = nil
 		if len(line) > 0 {
 			return cb(line, count, offset)
 		}
@@ -42,6 +42,10 @@ func inPlaceReadLineFromPath(filePath string, cb func([]byte, int64, int64) erro
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() {
+		if cerr := f.Close(); cerr != nil {
+			fmt.Println("Error closing file:", cerr)
+		}
+	}()
 	return inPlaceReadLine(f, cb)
 }

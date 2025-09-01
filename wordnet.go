@@ -16,12 +16,6 @@ type Handle struct {
 	db    []*cluster
 }
 
-type index struct {
-	pos   PartOfSpeech
-	lemma string
-	sense uint8
-}
-
 // The results of a search against the wordnet database
 type Lookup struct {
 	word    string   // the word the user searched for
@@ -158,7 +152,7 @@ func (w *Lookup) Gloss() string {
 
 func (w *Lookup) DumpStr() string {
 	s := fmt.Sprintf("Word: %s\n", w.String())
-	s += fmt.Sprintf("Synonyms: ")
+	s += "Synonyms: "
 	words := []string{}
 	for _, w := range w.cluster.words {
 		words = append(words, w.word)
@@ -240,8 +234,8 @@ func New(dir string) (*Handle, error) {
 
 		err = inPlaceReadLineFromPath(filename, func(data []byte, line, offset int64) error {
 			cnt++
-			if p, err := parseLine(data, line, offset); err != nil {
-				return fmt.Errorf("%s:%d: %s", err)
+			if p, err := parseLine(data, line); err != nil {
+				return fmt.Errorf("%s", err)
 			} else if p != nil {
 				// first, let's identify the cluster
 				index := ix{p.byteOffset, p.pos}
@@ -299,7 +293,7 @@ func New(dir string) (*Handle, error) {
 	}
 	for _, c := range byOffset {
 		if len(c.words) == 0 {
-			return nil, fmt.Errorf("ERROR, internal consistency error -> cluster without words %v\n", c)
+			return nil, fmt.Errorf("ERROR, internal consistency error -> cluster without words %v", c)
 		}
 		// add to the global slice of synsets (supports iteration)
 		h.db = append(h.db, c)
@@ -307,7 +301,7 @@ func New(dir string) (*Handle, error) {
 		// now index all the strings
 		for _, w := range c.words {
 			key := normalize(w.word)
-			v, _ := h.index[key]
+			v := h.index[key]
 			v = append(v, c)
 			h.index[key] = v
 		}
@@ -331,7 +325,7 @@ func (h *Handle) Lookup(crit Criteria) ([]Lookup, error) {
 		return nil, fmt.Errorf("empty string passed as criteria to lookup")
 	}
 	searchStr := normalize(crit.Matching)
-	clusters, _ := h.index[searchStr]
+	clusters := h.index[searchStr]
 	found := []Lookup{}
 	for _, c := range clusters {
 		if len(crit.POS) > 0 {
