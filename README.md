@@ -30,7 +30,7 @@ seconds on a modest laptop.
 import (
     "log"
 
-    "github.com/lloyd/wnram"
+    "github.com/coreruleset/wnram"
 )
 
 func main() {

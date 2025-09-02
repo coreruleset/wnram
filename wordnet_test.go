@@ -154,10 +154,13 @@ func TestHyponyms(t *testing.T) {
 
 func TestIterate(t *testing.T) {
 	count := 0
-	wnInstance.Iterate(PartOfSpeechList{Noun}, func(l Lookup) error {
+	err := wnInstance.Iterate(PartOfSpeechList{Noun}, func(l Lookup) error {
 		count++
 		return nil
 	})
+	if err != nil {
+		t.Fatalf("Iterate failed: %v", err)
+	}
 	if count != 82192 {
 		t.Errorf("Missing nouns!")
 	}
