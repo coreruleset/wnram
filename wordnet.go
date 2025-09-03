@@ -5,15 +5,16 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"strings"
-	"time"
 )
 
 // An initialized read-only, in-ram instance of the wordnet database.
 // May safely be shared by multiple threads of execution
 type Handle struct {
-	index map[string][]*cluster
-	db    []*cluster
+	index      map[string][]*cluster
+	db         []*cluster
+	exceptions map[string]string
 }
 
 // The results of a search against the wordnet database
@@ -53,24 +54,39 @@ type PartOfSpeech uint8
 // A set of multiple parts of speech
 type PartOfSpeechList []PartOfSpeech
 
+var suffixes = []string{
+	// Noun suffixes
+	"s", "ses", "xes", "zes", "ches", "shes", "men", "ies",
+	// Verb suffixes
+	"s", "ies", "es", "es", "ed", "ed", "ing", "ing",
+	// Adjective suffixes
+	"er", "est", "er", "est",
+}
+
+var pluralEndings = []string{
+	// Noun endings
+	"", "s", "x", "z", "ch", "sh", "man", "y",
+	// Verb endings
+	"", "y", "e", "", "e", "", "e", "",
+	// Adjective endings
+	"", "", "e", "e",
+}
+
+var offsets = []int{0, 8, 16}
+var counts = []int{8, 8, 4}
+
 func (l PartOfSpeechList) Empty() bool {
 	return len(l) == 0
 }
 
 func (l PartOfSpeechList) Contains(want PartOfSpeech) bool {
-	for _, got := range l {
-		if got == want {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(l, want)
 }
 
 const (
 	Noun PartOfSpeech = iota
 	Verb
 	Adjective
-	//	AdjectiveSatellite
 	Adverb
 )
 
@@ -154,12 +170,15 @@ func (w *Lookup) DumpStr() string {
 	s := fmt.Sprintf("Word: %s\n", w.String())
 	s += "Synonyms: "
 	words := []string{}
+
 	for _, w := range w.cluster.words {
 		words = append(words, w.word)
 	}
+
 	s += strings.Join(words, ", ") + "\n"
 	s += fmt.Sprintf("%d semantic relationships\n", len(w.cluster.relations))
 	s += "| " + w.cluster.gloss + "\n"
+
 	return s
 }
 
@@ -211,14 +230,15 @@ func (w *Lookup) Related(r Relation) (relationships []Lookup) {
 // Initialize a new in-ram WordNet databases reading files from the
 // specified directory.
 func New(dir string) (*Handle, error) {
-	cnt := 0
 	type ix struct {
 		index string
 		pos   PartOfSpeech
 	}
+
 	byOffset := map[ix]*cluster{}
+	exceptions := map[string]string{}
+
 	err := filepath.Walk(dir, func(filename string, info os.FileInfo, err error) error {
-		start := time.Now()
 		if err != nil || info.IsDir() {
 			return err
 		}
@@ -227,74 +247,92 @@ func New(dir string) (*Handle, error) {
 		if strings.HasPrefix(path.Base(filename), ".") || strings.HasSuffix(filename, "~") || strings.HasSuffix(filename, "#") {
 			return nil
 		}
-		// read only data files
-		if !strings.HasPrefix(path.Base(filename), "data") {
-			return nil
+
+		// read data files
+		if strings.HasPrefix(path.Base(filename), "data") {
+			err = inPlaceReadLineFromPath(filename, func(data []byte, line, offset int64) error {
+				if p, err := parseLine(data, line); err != nil {
+					return fmt.Errorf("%s", err)
+				} else if p != nil {
+					// first, let's identify the cluster
+					index := ix{p.byteOffset, p.pos}
+					c, ok := byOffset[index]
+					if !ok {
+						c = &cluster{}
+						byOffset[index] = c
+					}
+
+					// now update
+					c.pos = p.pos
+					c.words = p.words
+					c.gloss = p.gloss
+					c.debug = p.byteOffset
+
+					// now let's build relations
+					for _, r := range p.rels {
+						rindex := ix{r.offset, r.pos}
+						rcluster, ok := byOffset[rindex]
+						if !ok {
+							// create the other side of the relationship
+							rcluster = &cluster{}
+							byOffset[rindex] = rcluster
+						}
+						if r.isSemantic {
+							c.relations = append(c.relations, semanticRelation{
+								rel:    r.rel,
+								target: rcluster,
+							})
+						} else {
+							if int(r.source) >= len(c.words) {
+								return fmt.Errorf("%s:%d: error parsing relations, bogus source (words: %d, offset: %d) [%s]", filename, line, r.source, len(c.words), string(data))
+							}
+							c.words[r.source].relations = append(c.words[r.source].relations, syntacticRelation{
+								rel:        r.rel,
+								target:     rcluster,
+								wordNumber: r.dest,
+							})
+						}
+					}
+
+				}
+				return nil
+			})
+
+			return err
 		}
 
-		err = inPlaceReadLineFromPath(filename, func(data []byte, line, offset int64) error {
-			cnt++
-			if p, err := parseLine(data, line); err != nil {
-				return fmt.Errorf("%s", err)
-			} else if p != nil {
-				// first, let's identify the cluster
-				index := ix{p.byteOffset, p.pos}
-				c, ok := byOffset[index]
-				if !ok {
-					c = &cluster{}
-					byOffset[index] = c
+		// read exception files
+		if strings.HasSuffix(path.Base(filename), ".exc") {
+			err = inPlaceReadLineFromPath(filename, func(data []byte, line, offset int64) error {
+				parts := strings.SplitN(string(data), " ", 2)
+				if len(parts) == 2 {
+					exceptions[parts[0]] = parts[1]
+				} else {
+					return fmt.Errorf("malformed exception line %d: %q", line, string(data))
 				}
-				// now update
-				c.pos = p.pos
-				c.words = p.words
-				c.gloss = p.gloss
-				c.debug = p.byteOffset
+				return nil
+			})
+		}
 
-				// now let's build relations
-				for _, r := range p.rels {
-					rindex := ix{r.offset, r.pos}
-					rcluster, ok := byOffset[rindex]
-					if !ok {
-						// create the other side of the relationship
-						rcluster = &cluster{}
-						byOffset[rindex] = rcluster
-					}
-					if r.isSemantic {
-						c.relations = append(c.relations, semanticRelation{
-							rel:    r.rel,
-							target: rcluster,
-						})
-					} else {
-						if int(r.source) >= len(c.words) {
-							return fmt.Errorf("%s:%d: error parsing relations, bogus source (words: %d, offset: %d) [%s]", filename, line, r.source, len(c.words), string(data))
-						}
-						c.words[r.source].relations = append(c.words[r.source].relations, syntacticRelation{
-							rel:        r.rel,
-							target:     rcluster,
-							wordNumber: r.dest,
-						})
-					}
-				}
-
-			}
-			return nil
-		})
-		fmt.Printf("%s in %s\n", filename, time.Since(start).String())
 		return err
 	})
+
 	if err != nil {
 		return nil, err
 	}
 
-	// now that we've built up the in ram database, lets' index it
 	h := Handle{
-		db:    make([]*cluster, 0, len(byOffset)),
-		index: make(map[string][]*cluster),
+		db:         make([]*cluster, 0, len(byOffset)),
+		index:      make(map[string][]*cluster),
+		exceptions: exceptions,
 	}
+
+	// now that we've built up the in ram database, lets' index it
 	for _, c := range byOffset {
 		if len(c.words) == 0 {
 			return nil, fmt.Errorf("ERROR, internal consistency error -> cluster without words %v", c)
 		}
+
 		// add to the global slice of synsets (supports iteration)
 		h.db = append(h.db, c)
 
@@ -324,27 +362,44 @@ func (h *Handle) Lookup(crit Criteria) ([]Lookup, error) {
 	if crit.Matching == "" {
 		return nil, fmt.Errorf("empty string passed as criteria to lookup")
 	}
+
 	searchStr := normalize(crit.Matching)
+
+	// Check if searchStr is a known plural exception
+	// if so, replace it with the singular form
+	if val, ok := h.exceptions[searchStr]; ok {
+		searchStr = val
+	}
+
 	clusters := h.index[searchStr]
-	found := []Lookup{}
-	for _, c := range clusters {
-		if len(crit.POS) > 0 {
-			satisfied := false
-			for _, p := range crit.POS {
-				if p == c.pos {
-					satisfied = true
+	if clusters == nil {
+		// Try to find a baseform (lemma) of the search string
+		for _, pos := range []PartOfSpeech{Noun, Verb, Adjective, Adverb} {
+			if base := h.MorphWord(searchStr, pos); base != "" {
+				clusters = h.index[base]
+				if clusters != nil {
 					break
 				}
 			}
+		}
+	}
+
+	found := []Lookup{}
+
+	for _, c := range clusters {
+		if len(crit.POS) > 0 {
+			satisfied := slices.Contains(crit.POS, c.pos)
 			if !satisfied {
 				continue
 			}
 		}
+
 		found = append(found, Lookup{
 			word:    crit.Matching,
 			cluster: c,
 		})
 	}
+
 	return found, nil
 }
 
@@ -353,13 +408,55 @@ func (h *Handle) Iterate(pos PartOfSpeechList, cb func(Lookup) error) error {
 		if !pos.Empty() && !pos.Contains(c.pos) {
 			continue
 		}
+
 		err := cb(Lookup{
 			word:    c.words[0].word,
 			cluster: c,
 		})
+
 		if err != nil {
 			return err
 		}
 	}
+
 	return nil
+}
+
+// wordbase removes a suffix from 'word' if it matches suffixes[ender], then appends plugalEndings[ender].
+func wordbase(word string, ender int) string {
+	copy := word
+	if strings.HasSuffix(copy, suffixes[ender]) {
+		// Remove the suffix
+		copy = copy[:len(copy)-len(suffixes[ender])]
+		// Append the pluralEndings string
+		copy += pluralEndings[ender]
+	}
+
+	return copy
+}
+
+// Try to find all possible baseforms (lemmas) of individual word in POS.
+func (h *Handle) MorphWord(word string, pos PartOfSpeech) string {
+	if pos == Adverb {
+		// Adverbs are not inflected in WordNet
+		return ""
+	} else if pos == Noun {
+		if strings.HasSuffix(word, "ful") {
+			return word[:len(word)-3]
+		} else if strings.HasSuffix(word, "ss") || len(word) <= 2 {
+			return ""
+		}
+	}
+
+	offset := offsets[int(pos)]
+	count := counts[int(pos)]
+
+	for i := range count {
+		retval := wordbase(word, offset+i)
+		if h.index[retval] != nil && retval != word {
+			return retval
+		}
+	}
+
+	return ""
 }
