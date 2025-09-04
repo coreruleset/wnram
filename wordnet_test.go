@@ -27,7 +27,6 @@ func TestParsing(t *testing.T) {
 }
 
 func TestBasicLookup(t *testing.T) {
-	// very basic test
 	found, err := wnInstance.Lookup(Criteria{Matching: "good"})
 	if err != nil {
 		t.Fatalf("%s", err)
@@ -40,8 +39,59 @@ func TestBasicLookup(t *testing.T) {
 			break
 		}
 	}
+
 	if !gotAdjective {
 		t.Errorf("couldn't find basic adjective form for good")
+	}
+}
+
+func TestPluralExceptionLookup(t *testing.T) {
+	found, err := wnInstance.Lookup(Criteria{Matching: "wolves"})
+	if err != nil {
+		t.Fatalf("%s", err)
+	}
+
+	gotNoun := false
+	for _, f := range found {
+		if f.POS() == Noun {
+			gotNoun = true
+			break
+		}
+	}
+
+	if !gotNoun {
+		t.Errorf("couldn't find exception plural noun form for wolves")
+	}
+}
+
+func TestPluralLookup(t *testing.T) {
+	tests := []struct {
+		plural   string
+		singular string
+		pos      PartOfSpeech
+	}{
+		// Noun examples
+		{"dogs", "dog", Noun},
+		{"cars", "car", Noun},
+		{"houses", "house", Noun},
+		// Verb examples
+		{"runs", "run", Verb},
+		{"flies", "fly", Verb},
+		{"plays", "play", Verb},
+		// Adjective examples
+		{"faster", "fast", Adjective},
+		{"stronger", "strong", Adjective},
+	}
+
+	for _, tt := range tests {
+		found, err := wnInstance.Lookup(Criteria{Matching: tt.plural})
+		if err != nil {
+			t.Errorf("Lookup(%q) failed: %v", tt.plural, err)
+			continue
+		}
+		if len(found) == 0 {
+			t.Errorf("couldn't find %v form for %q", tt.pos, tt.plural)
+		}
 	}
 }
 
@@ -163,5 +213,67 @@ func TestIterate(t *testing.T) {
 	}
 	if count != 82192 {
 		t.Errorf("Missing nouns!")
+	}
+}
+func TestWordbase(t *testing.T) {
+	tests := []struct {
+		word     string
+		ender    int
+		expected string
+	}{
+		// Noun suffixes
+		{"dogs", 0, "dog"},
+		{"buses", 1, "bus"},
+		// Verb suffixes
+		{"runs", 8, "run"},
+		{"flies", 9, "fly"},
+		// Adjective suffixes
+		{"faster", 16, "fast"},  // "er" -> ""
+		{"fastest", 17, "fast"}, // "est" -> ""
+	}
+
+	for _, tt := range tests {
+		got := wordbase(tt.word, tt.ender)
+		if got != tt.expected {
+			t.Errorf("wordbase(%q, %d) = %q; want %q", tt.word, tt.ender, got, tt.expected)
+		}
+	}
+}
+
+func TestMorphword(t *testing.T) {
+	tests := []struct {
+		word     string
+		pos      PartOfSpeech
+		expected string
+	}{
+		// Noun cases
+		{"dogs", Noun, "dog"},
+		{"buses", Noun, "bus"},
+		{"boxes", Noun, "box"},
+		{"handful", Noun, "hand"},
+		{"men", Noun, "man"},
+		{"ladies", Noun, "lady"},
+		{"fullness", Noun, ""}, // "ss" ending returns ""
+		{"a", Noun, ""},        // too short returns ""
+		// Verb cases
+		{"runs", Verb, "run"},
+		{"flies", Verb, "fly"},
+		{"played", Verb, "play"},
+		{"playing", Verb, "play"},
+		// Adjective cases
+		{"faster", Adjective, "fast"},
+		{"fastest", Adjective, "fast"},
+		{"stronger", Adjective, "strong"},
+		{"strongest", Adjective, "strong"},
+		// Adverb cases (should not change)
+		{"quickly", Adverb, ""},
+		{"slowly", Adverb, ""},
+	}
+
+	for _, tt := range tests {
+		got := wnInstance.MorphWord(tt.word, tt.pos)
+		if got != tt.expected {
+			t.Errorf("morphword(%q, %v) = %q; want %q", tt.word, tt.pos, got, tt.expected)
+		}
 	}
 }
