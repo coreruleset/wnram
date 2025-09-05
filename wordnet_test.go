@@ -3,6 +3,7 @@ package wnram
 import (
 	"path"
 	"runtime"
+	"slices"
 	"testing"
 )
 
@@ -107,6 +108,7 @@ func TestLemma(t *testing.T) {
 		}
 		t.Fatalf("expected one synonym cluster for awesome, got %d", len(found))
 	}
+
 	if found[0].Lemma() != "amazing" {
 		t.Errorf("incorrect lemma for awesome (%s)", found[0].Lemma())
 	}
@@ -114,13 +116,7 @@ func TestLemma(t *testing.T) {
 
 func setContains(haystack, needles []string) bool {
 	for _, n := range needles {
-		found := false
-		for _, h := range haystack {
-			if n == h {
-				found = true
-				break
-			}
-		}
+		found := slices.Contains(haystack, n)
 		if !found {
 			return false
 		}
@@ -160,6 +156,7 @@ func TestAntonyms(t *testing.T) {
 			antonyms = append(antonyms, a.Word())
 		}
 	}
+
 	if !setContains(antonyms, []string{"bad", "evil"}) {
 		t.Errorf("missing antonyms for good")
 	}
@@ -178,6 +175,7 @@ func TestHypernyms(t *testing.T) {
 			hypernyms = append(hypernyms, a.Word())
 		}
 	}
+
 	if !setContains(hypernyms, []string{"punch"}) {
 		t.Errorf("missing hypernyms for jab (expected punch, got %v)", hypernyms)
 	}
@@ -196,6 +194,7 @@ func TestHyponyms(t *testing.T) {
 			hyponyms = append(hyponyms, a.Word())
 		}
 	}
+
 	expected := []string{"chocolate", "cheese", "pasta", "leftovers"}
 	if !setContains(hyponyms, expected) {
 		t.Errorf("missing hyponyms for candy (expected %v, got %v)", expected, hyponyms)
@@ -208,9 +207,11 @@ func TestIterate(t *testing.T) {
 		count++
 		return nil
 	})
+
 	if err != nil {
 		t.Fatalf("Iterate failed: %v", err)
 	}
+
 	if count != 82192 {
 		t.Errorf("Missing nouns!")
 	}

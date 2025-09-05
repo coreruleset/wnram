@@ -26,6 +26,7 @@ func (l *lexable) next() (rune, bool) {
 		*l = (*l)[width:]
 		return curchar, true
 	}
+
 	return ' ', false
 }
 func (l *lexable) peek() (rune, bool) {
@@ -33,6 +34,7 @@ func (l *lexable) peek() (rune, bool) {
 		c, _ := utf8.DecodeRuneInString(string(*l))
 		return c, true
 	}
+
 	return ' ', false
 }
 
@@ -50,13 +52,16 @@ func (l *lexable) lexDecimalNumber() (int64, error) {
 		r, _ := l.next()
 		number += fmt.Sprintf("%c", r)
 	}
+
 	if len(number) == 0 {
 		return 0, fmt.Errorf("number not found in string: %s", *l)
 	}
+
 	i, err := strconv.ParseInt(number, 10, 64)
 	if err != nil {
 		return 0, err
 	}
+
 	return i, nil
 }
 
@@ -76,6 +81,7 @@ func (l *lexable) lexWord() (string, error) {
 			word = append(word, buf[0:x]...)
 		}
 	}
+
 	return string(word), nil
 }
 
@@ -85,9 +91,11 @@ func (l *lexable) lexGloss() (string, error) {
 	if !ok {
 		return "", fmt.Errorf("definition expected")
 	}
+
 	if r != '|' {
 		return "", fmt.Errorf("definition expected (want '|' got '%c') [%q]", r, string(*l))
 	}
+
 	return strings.TrimSpace(string(*l)), nil
 }
 
@@ -101,13 +109,16 @@ func (l *lexable) lexHexNumber() (int64, error) {
 		r, _ := l.next()
 		number += fmt.Sprintf("%c", r)
 	}
+
 	if len(number) == 0 {
 		return 0, fmt.Errorf("number not found in string: %s", *l)
 	}
+
 	i, err := strconv.ParseInt(number, 16, 64)
 	if err != nil {
 		return 0, err
 	}
+
 	return i, nil
 }
 
@@ -116,14 +127,17 @@ func (l *lexable) lexOffset() (string, error) {
 	if len(*l) < 8 {
 		return "", fmt.Errorf("invalid offset")
 	}
+
 	for i := 0; i < 8; i++ {
 		if !unicode.IsDigit(rune((*l)[i])) {
 			return "", fmt.Errorf("invalid chars in offset: %s", string((*l)[0:8]))
 		}
 	}
+
 	cpy := make([]byte, 8)
 	copy(cpy, (*l)[0:8])
 	*l = (*l)[8:]
+
 	return string(cpy), nil
 }
 
@@ -133,6 +147,7 @@ func (l *lexable) lexPOS() (PartOfSpeech, error) {
 	if !ok {
 		return 0, fmt.Errorf("unexpected end of input")
 	}
+
 	switch curchar {
 	case 'n':
 		return Noun, nil
@@ -149,6 +164,7 @@ func (l *lexable) lexPOS() (PartOfSpeech, error) {
 	case 'r':
 		return Adverb, nil
 	}
+
 	return 0, fmt.Errorf("invalid part of speech: %c", curchar)
 }
 
@@ -158,6 +174,7 @@ func (l *lexable) lexRelationType() (Relation, error) {
 	if err != nil {
 		return 0, fmt.Errorf("can't read relation type: %s", err)
 	}
+
 	switch word {
 	case "!":
 		return Antonym, nil
@@ -213,6 +230,7 @@ func (l *lexable) lexRelationType() (Relation, error) {
 	case "~i":
 		return InstanceHyponym, nil
 	}
+
 	return 0, fmt.Errorf("unrecognized pointer type: %q", word)
 }
 
@@ -247,25 +265,30 @@ func parseLine(data []byte, line int64) (*parsed, error) {
 		}
 		return nil, fmt.Errorf("can't parse line, expected comment or Offset")
 	}
+
 	// file number
 	filenum, err := l.lexDecimalNumber()
 	if err != nil {
 		return nil, fmt.Errorf("filenumber expected: %s", err)
 	}
+
 	pos, err := l.lexPOS()
 	if err != nil {
 		return nil, fmt.Errorf("part of speech expected: %s", err)
 	}
+
 	// lexicographer file containing the word
 	wordcount, err := l.lexHexNumber()
 	if err != nil {
 		return nil, fmt.Errorf("wordcount expected: %s", err)
 	}
+
 	p := parsed{
 		byteOffset: byteOffset,
 		pos:        pos,
 		fileNum:    filenum,
 	}
+
 	for ; wordcount > 0; wordcount-- {
 		value, err := l.lexWord()
 		if err != nil {
@@ -281,10 +304,12 @@ func parseLine(data []byte, line int64) (*parsed, error) {
 			sense: uint8(sense),
 		})
 	}
+
 	pcount, err := l.lexDecimalNumber()
 	if err != nil {
 		return nil, fmt.Errorf("pointer count expected: %s", err)
 	}
+
 	for ; pcount > 0; pcount-- {
 		if rt, err := l.lexRelationType(); err != nil {
 			return nil, err
@@ -310,6 +335,7 @@ func parseLine(data []byte, line int64) (*parsed, error) {
 			p.rels = append(p.rels, r)
 		}
 	}
+
 	// parse optional frame count
 	frameCount, err := l.lexDecimalNumber()
 	if err == nil {
@@ -324,10 +350,12 @@ func parseLine(data []byte, line int64) (*parsed, error) {
 			}
 		}
 	}
+
 	gloss, err := l.lexGloss()
 	if err != nil {
 		return nil, err
 	}
+
 	p.gloss = gloss
 
 	return &p, nil
