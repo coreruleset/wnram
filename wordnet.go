@@ -209,6 +209,7 @@ func (w *Lookup) Related(r Relation) (relationships []Lookup) {
 			})
 		}
 	}
+
 	// next let's look for syntactic relationships
 	key := normalize(w.word)
 	for _, word := range w.cluster.words {
@@ -437,10 +438,11 @@ func wordbase(word string, ender int) string {
 
 // Try to find all possible baseforms (lemmas) of individual word in POS.
 func (h *Handle) MorphWord(word string, pos PartOfSpeech) string {
-	if pos == Adverb {
+	switch pos {
+	case Adverb:
 		// Adverbs are not inflected in WordNet
 		return ""
-	} else if pos == Noun {
+	case Noun:
 		if strings.HasSuffix(word, "ful") {
 			return word[:len(word)-3]
 		} else if strings.HasSuffix(word, "ss") || len(word) <= 2 {
